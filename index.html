@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pro Checkers 2026</title>
+    <style>
+        body { background: #1a1a1a; color: white; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; margin: 0; }
+        .game-container { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+        
+        /* Board & Squares */
+        #board { display: grid; grid-template-columns: repeat(8, 60px); grid-template-rows: repeat(8, 60px); border: 5px solid #444; position: relative; }
+        .square { width: 60px; height: 60px; display: flex; justify-content: center; align-items: center; cursor: pointer; }
+        .white-sq { background-color: #f0d9b5; }
+        .black-sq { background-color: #b58863; }
+        .last-move { background-color: rgba(241, 196, 15, 0.4) !important; }
+
+        /* Pieces */
+        .piece { width: 46px; height: 46px; border-radius: 50%; border: 3px solid rgba(0,0,0,0.4); display: flex; justify-content: center; align-items: center; transition: 0.2s; position: relative; }
+        .red { background: #e74c3c; box-shadow: 0 4px #c0392b; }
+        .black { background: #2c3e50; box-shadow: 0 4px #1a252f; }
+        .king::after { content: '👑'; position: absolute; top: -8px; font-size: 20px; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+        .selected { transform: translateY(-5px) scale(1.1); box-shadow: 0 8px 20px #f1c40f; border-color: gold; z-index: 10; }
+
+        /* Sidebar UI */
+        .sidebar { width: 220px; background: #2c2c2c; padding: 20px; border-radius: 12px; border: 1px solid #444; display: flex; flex-direction: column; gap: 15px; }
+        .status-box { background: #444; padding: 10px; text-align: center; font-weight: bold; color: #f1c40f; border-radius: 6px; border: 1px solid #555; }
+        .score-row { display: flex; justify-content: space-between; font-size: 14px; background: #1a1a1a; padding: 8px; border-radius: 4px; }
+        
+        button { padding: 12px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        button:hover { background: #c0392b; transform: scale(1.02); }
+
+        /* Victory Popup */
+        #win-overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.9); z-index: 100; flex-direction: column; align-items: center; justify-content: center; }
+    </style>
+</head>
+<body>
+
+    <div id="win-overlay">
+        <h1 id="win-text" style="color: gold; font-size: 50px;">VICTORY!</h1>
+        <button onclick="location.reload()" style="width: 200px;">PLAY AGAIN</button>
+    </div>
+
+    <h2 style="margin-bottom: 20px;">PRO CHECKERS</h2>
+
+    <div class="game-container">
+        <div id="board"></div>
+
+        <div class="sidebar">
+            <div class="status-box" id="status">YOUR TURN</div>
+            
+            <div class="score-row">
+                <span>You Captured:</span>
+                <span id="score-red" style="color:#e74c3c">0</span>
+            </div>
+            <div class="score-row">
+                <span>Bot Captured:</span>
+                <span id="score-black" style="color:#3498db">0</span>
+            </div>
+
+            <button onclick="location.reload()">RESTART</button>
+        </div>
+    </div>
+
+<script>
+    let board = [];
+    let selected = null;
+    let turn = 'red';
+    let lastMove = null;
+    let captures = { red: 0, black: 0 };
+
+    // Audio SFX
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSfx(freq) {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+    }
+
+    function initBoard() {
+        for (let r = 0; r < 8; r++) {
+            board[r] = [];
+            for (let c = 0; c < 8; c++) {
+                let piece = null;
+                if ((r + c) % 2 !== 0) {
+                    if (r < 3) piece = { color: 'black', king: false };
+                    else if (r > 4) piece = { color: 'red', king: false };
+                }
+                board[r][c] = piece;
+            }
+        }
+    }
+
+    function draw() {
+        const bEl = document.getElementById('board');
+        bEl.innerHTML = '';
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                const sq = document.createElement('div');
+                sq.className = `square ${(r + c) % 2 === 0 ? 'white-sq' : 'black-sq'}`;
+                if (lastMove && lastMove.r === r && lastMove.c === c) sq.classList.add('last-move');
+                
+                const p = board[r][c];
+                if (p) {
+                    const pEl = document.createElement('div');
+                    pEl.className = `piece ${p.color} ${p.king ? 'king' : ''} ${selected && selected.r === r && selected.c === c ? 'selected' : ''}`;
+                    sq.appendChild(pEl);
+                }
+                sq.onclick = () => handleClick(r, c);
+                bEl.appendChild(sq);
+            }
+        }
+        checkWin();
+    }
+
+    function handleClick(r, c) {
+        if (turn !== 'red') return;
+        const p = board[r][c];
+
+        if (p && p.color === 'red') {
+            selected = { r, c };
+            draw();
+        } else if (selected) {
+            if (tryMove(selected.r, selected.c, r, c)) {
+                selected = null;
+                turn = 'black';
+                document.getElementById('status').textContent = "BOT THINKING...";
+                draw();
+                setTimeout(botMove, 800);
+            }
+        }
+    }
+
+    function tryMove(fR, fC, tR, tC) {
+        if (board[tR][tC] !== null) return false;
+        let p = board[fR][fC];
+        let rDiff = tR - fR;
+        let cDiff = Math.abs(tC - fC);
+
+        if (Math.abs(rDiff) === 1 && cDiff === 1) {
+            if (!p.king && p.color === 'red' && rDiff > 0) return false;
+            if (!p.king && p.color === 'black' && rDiff < 0) return false;
+            executeMove(fR, fC, tR, tC);
+            playSfx(200);
+            return true;
+        }
+
+        if (Math.abs(rDiff) === 2 && cDiff === 2) {
+            let mR = fR + rDiff / 2;
+            let mC = fC + (tC - fC) / 2;
+            if (board[mR][mC] && board[mR][mC].color !== p.color) {
+                board[mR][mC] = null;
+                captures[p.color]++;
+                document.getElementById(`score-${p.color}`).textContent = captures[p.color];
+                executeMove(fR, fC, tR, tC);
+                playSfx(400);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function executeMove(fR, fC, tR, tC) {
+        let p = board[fR][fC];
+        if (tR === 0 && p.color === 'red') p.king = true;
+        if (tR === 7 && p.color === 'black') p.king = true;
+        board[tR][tC] = p;
+        board[fR][fC] = null;
+        lastMove = { r: tR, c: tC };
+    }
+
+    function botMove() {
+        let moves = [];
+        for(let r=0; r<8; r++) {
+            for(let c=0; c<8; c++) {
+                if(board[r][c] && board[r][c].color === 'black') {
+                    let targets = [[r+1,c+1],[r+1,c-1],[r-1,c+1],[r-1,c-1],[r+2,c+2],[r+2,c-2],[r-2,c+2],[r-2,c-2]];
+                    targets.forEach(t => {
+                        if(t[0]>=0 && t[0]<8 && t[1]>=0 && t[1]<8) {
+                            if(isValidBotMove(r, c, t[0], t[1])) moves.push({f:[r,c], t:t, j:Math.abs(t[0]-r)===2});
+                        }
+                    });
+                }
+            }
+        }
+        if(moves.length > 0) {
+            let jumps = moves.filter(m => m.j);
+            let final = jumps.length > 0 ? jumps[0] : moves[Math.floor(Math.random()*moves.length)];
+            tryMove(final.f[0], final.f[1], final.t[0], final.t[1]);
+        }
+        turn = 'red';
+        document.getElementById('status').textContent = "YOUR TURN";
+        draw();
+    }
+
+    function isValidBotMove(fR, fC, tR, tC) {
+        let p = board[fR][fC];
+        if(board[tR][tC]) return false;
+        let rd = tR - fR;
+        if(!p.king && rd < 0) return false;
+        if(Math.abs(rd) === 1 && Math.abs(tC-fC) === 1) return true;
+        if(Math.abs(rd) === 2 && Math.abs(tC-fC) === 2) {
+            let mR = fR + rd/2, mC = fC + (tC-fC)/2;
+            return board[mR][mC] && board[mR][mC].color === 'red';
+        }
+        return false;
+    }
+
+    function checkWin() {
+        if(captures.red === 12) showEnd("VICTORY!");
+        if(captures.black === 12) showEnd("DEFEAT!");
+    }
+
+    function showEnd(txt) {
+        document.getElementById('win-text').textContent = txt;
+        document.getElementById('win-overlay').style.display = 'flex';
+    }
+
+    initBoard();
+    draw();
+</script>
+</body>
+</html>
