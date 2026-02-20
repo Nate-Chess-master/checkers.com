@@ -7,7 +7,7 @@ so this is still in its beta form and you may find lots of errors such as the pi
 
 next upd ========    BOT  difficultiesnext upd ======== BOT difficulties
 
-made by NATE an 12 year old with ai
+
 
 
 
